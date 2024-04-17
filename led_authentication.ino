@@ -1,5 +1,7 @@
 #include <SPI.h>
 #include <MFRC522.h>
+#include <Ethernet.h>
+#include <SD.h>
 
 // Pin definitions
 const int RED_PIN = 8;
@@ -18,12 +20,27 @@ String tagID = "";
 // Timeout for granting access (in milliseconds)
 const unsigned long accessTimeout = 5000;
 
+// Variables needed for Web Server
+const byte mac[] = {0xA8, 0x61, 0x0A, 0xAE, 0x3A, 0xC4};  // Replace w/ of ethernet shield
+EthernetServer server(80);
+File webPage;
+const String welcomePageHTML = "index.html";
+const String successPageHTML = "success.html";
+const String errorPageHTML = "error.html";
+
 // Instance of the MFRC522 RFID reader
 MFRC522 mfrc522(SS_PIN, RST_PIN);
 
 void setup() {
+  // Web server start
+  Ethernet.begin(mac);
+  server.begin();
+  
   // Initializing serial communication and RFID reader
   Serial.begin(9600);
+
+  setupServer();
+  
   SPI.begin();
   mfrc522.PCD_Init();
 
@@ -37,9 +54,39 @@ void setup() {
   Serial.println("Scan Your Card>>");
 }
 
+void setupServer(){
+  Serial.println(Ethernet.localIP());
+
+  Serial.println("Initializing SD card...");
+  if (!SD.begin(4)){
+    Serial.println("ERROR - SD card initialization failed!");
+    return;
+  }
+  Serial.println("SUCCESS - SD card initialized.");
+  if (!SD.exists(welcomePageHTML)){
+    Serial.print("ERROR - Can't find ");
+    Serial.print(welcomePageHTML);
+    Serial.println(" file!");
+  }
+  if (!SD.exists(successPageHTML)){
+    Serial.print("ERROR - Can't find ");
+    Serial.print(successPageHTML);
+    Serial.println(" file!");
+  }
+  if (!SD.exists(errorPageHTML)){
+    Serial.print("ERROR - Can't find ");
+    Serial.print(errorPageHTML);
+    Serial.println(" file!");
+  }
+  Serial.println("SUCCESS - All files found");
+}
+
 void loop() {
   // Setting LED to standby color (Yellow)
   setColor(255, 255, 0);
+
+  EthernetClient client = server.available();
+  displayPage(welcomePageHTML, client);
 
   // Waiting until new tag is available
   while (getID()) {
@@ -57,7 +104,7 @@ void loop() {
       while (millis() - startTime < accessTimeout) {
         if (getID() && tagID == SlaveTag) {
           // Slave Tag detected within the timeout period
-          Serial.println("Slave Card Detected");
+          displayPage(successPageHTML, client);
           Serial.println("Access Granted!");
 
           // Setting LED to granted color (Green)
@@ -75,6 +122,7 @@ void loop() {
       // Access denied if Slave Tag not detected within the timeout period
       if (tagID != SlaveTag) {
         Serial.println("Access Denied! Slave Card Not Detected within the timeout period");
+        displayPage(errorPageHTML, client);
 
         // Setting LED to denied color (Red)
         setColor(255, 0, 0);
@@ -120,4 +168,39 @@ void setColor(int redValue, int greenValue, int blueValue) {
   analogWrite(RED_PIN, redValue);
   analogWrite(GREEN_PIN, greenValue);
   analogWrite(BLUE_PIN, blueValue);
+}
+
+void displayPage(string htmlPage, EthernetClient client){
+  if (client){
+    boolean currentLineIsBlank = true;
+    while (client.connected()){
+      if (client.available()){
+        char c = client.read();
+        if (c == '\n' && currentLineIsBlank){
+          client.println("HTTP/1.1 200 OK");
+          client.println("Content-Type: text/html");
+          client.println("Connection: close");
+          client.println();
+
+          webPage = SD.open(htmlPage);
+          if (webPage){
+            while (webPage.available()){
+              client.write(webPage.read());
+            }
+            webPage.close();
+          }
+          break;
+        }
+        if (c == '\n'){
+          currentLineIsBlank = true;
+        }
+        else if (c != '\r'){
+          currentLineIsBlank = false;
+        }
+      }
+    }
+    delay(1);
+    client.stop()
+    Serial.println("Client disconnected!");
+  }
 }
