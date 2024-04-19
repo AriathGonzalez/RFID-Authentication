@@ -21,64 +21,90 @@ String tagID = "";
 const unsigned long accessTimeout = 5000;
 
 // Variables needed for Web Server
-const byte mac[] = {0xA8, 0x61, 0x0A, 0xAE, 0x3A, 0xC4};  // Replace w/ of ethernet shield
+uint8_t mac[] = {0xA8, 0x61, 0x0A, 0xAE, 0x3A, 0xC4};  // Replace w/ MAC of ethernet shield
+IPAddress ip(192, 168, 1, 177);
 EthernetServer server(80);
 File webPage;
-const String welcomePageHTML = "index.html";
-const String successPageHTML = "success.html";
-const String errorPageHTML = "error.html";
+const String welcomePageHTML = "index.htm";
+const String successPageHTML = "success.htm";
+const String errorPageHTML = "error.htm";
 
 // Instance of the MFRC522 RFID reader
 MFRC522 mfrc522(SS_PIN, RST_PIN);
 
 void setup() {
-  // Web server start
-  Ethernet.begin(mac);
-  server.begin();
-  
-  // Initializing serial communication and RFID reader
+  // Initializing serial communication
   Serial.begin(9600);
-
-  setupServer();
+  while (!Serial) {
+    ; // wait for serial port to connect. Needed for native USB port only
+  }
   
-  SPI.begin();
-  mfrc522.PCD_Init();
+  setupSD();
+  setupRFID();
+  setupLED();
+  setupServer();
 
-  // Setting LED pins as output
-  pinMode(RED_PIN, OUTPUT);
-  pinMode(GREEN_PIN, OUTPUT);
-  pinMode(BLUE_PIN, OUTPUT);
-
-  // Printing initialization message
   Serial.println("Access Control");
   Serial.println("Scan Your Card>>");
 }
 
-void setupServer(){
-  Serial.println(Ethernet.localIP());
-
+void setupSD(){
   Serial.println("Initializing SD card...");
-  if (!SD.begin(4)){
+  if (!SD.begin(4)) {
     Serial.println("ERROR - SD card initialization failed!");
     return;
   }
   Serial.println("SUCCESS - SD card initialized.");
+  
   if (!SD.exists(welcomePageHTML)){
     Serial.print("ERROR - Can't find ");
     Serial.print(welcomePageHTML);
     Serial.println(" file!");
+    return;
   }
   if (!SD.exists(successPageHTML)){
     Serial.print("ERROR - Can't find ");
     Serial.print(successPageHTML);
     Serial.println(" file!");
+    return;
   }
   if (!SD.exists(errorPageHTML)){
     Serial.print("ERROR - Can't find ");
     Serial.print(errorPageHTML);
     Serial.println(" file!");
-  }
+    return;
+  }  
   Serial.println("SUCCESS - All files found");
+}
+
+void setupRFID() {
+  SPI.begin();
+  mfrc522.PCD_Init();
+}
+
+void setupLED() {
+  pinMode(RED_PIN, OUTPUT);
+  pinMode(GREEN_PIN, OUTPUT);
+  pinMode(BLUE_PIN, OUTPUT);
+}
+
+void setupServer() {
+   Ethernet.begin(mac, ip);
+
+  // Check for Ethernet hardware present
+  if (Ethernet.hardwareStatus() == EthernetNoHardware) {
+    Serial.println("Ethernet shield was not found.  Sorry, can't run without hardware. :(");
+    while (true) {
+      delay(1); // do nothing, no point running without Ethernet hardware
+    }
+  }
+  if (Ethernet.linkStatus() == LinkOFF) {
+    Serial.println("Ethernet cable is not connected.");
+  }
+  
+  server.begin();
+  Serial.print("Server is at ");
+  Serial.println(Ethernet.localIP());
 }
 
 void loop() {
@@ -170,7 +196,7 @@ void setColor(int redValue, int greenValue, int blueValue) {
   analogWrite(BLUE_PIN, blueValue);
 }
 
-void displayPage(string htmlPage, EthernetClient client){
+void displayPage(String htmlPage, EthernetClient client){
   if (client){
     boolean currentLineIsBlank = true;
     while (client.connected()){
@@ -200,7 +226,7 @@ void displayPage(string htmlPage, EthernetClient client){
       }
     }
     delay(1);
-    client.stop()
+    client.stop();
     Serial.println("Client disconnected!");
   }
 }
